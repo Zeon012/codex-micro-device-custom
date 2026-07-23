@@ -1,4 +1,4 @@
-# I built my own Codex Micro in a weekend
+# DIY Codex Micro
 
 ![A white DIY Codex Micro controller on an electronics workbench](images/codex-micro-header.jpg)
 
