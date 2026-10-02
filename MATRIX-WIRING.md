@@ -27,13 +27,13 @@ The encoder is outside the switch matrix. Empty positions have no switch.
 ```text
                          C0       C1       C2       C3
                      +--------+--------+--------+--------+
-R0 / GPIO 4          | empty  | Task 1 | Task 2 | empty  |
+R0 / GPIO 8          | empty  | Task 1 | Task 2 | empty  |
                      +--------+--------+--------+--------+
-R1 / GPIO 5          | Task 3 | Task 4 | Task 5 | Task 6 |
+R1 / GPIO 9          | Task 3 | Task 4 | Task 5 | Task 6 |
                      +--------+--------+--------+--------+
-R2 / GPIO 6          | Fast   | Approve| Reject |Continue|
+R2 / GPIO 10         | Fast   | Approve| Reject |Continue|
                      +--------+--------+--------+--------+
-R3 / GPIO 7          | empty  | Mic B  | Mic A  | Send   |
+R3 / GPIO 11         | empty  | Mic B  | Mic A  | Send   |
                      +--------+--------+--------+--------+
 ```
 
