@@ -1,0 +1,36 @@
+{
+  "name": "codex-micro-configurator",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Portable configurator for the Codex Micro macropad",
+  "main": "desktop/main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win portable"
+  },
+  "devDependencies": {
+    "electron": "^39.0.0",
+    "electron-builder": "^26.0.0"
+  },
+  "build": {
+    "appId": "com.codexmicro.configurator",
+    "productName": "Codex Micro Configurator",
+    "files": [
+      "desktop/**/*",
+      "build/**/*",
+      "index.html",
+      "app.js",
+      "style.css"
+    ],
+    "icon": "build/icon.ico",
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ],
+      "artifactName": "Codex-Micro-Configurator-Portable.exe"
+    }
+  }
+}

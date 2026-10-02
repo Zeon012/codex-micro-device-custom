@@ -8,7 +8,7 @@ Spoiler alert! It's as useless as it seems. But it was a good weekend project, a
 
 ## What it actually is (and isn't)
 
-It's an unofficial USB shortcut controller, not a clone. It shows up as a plain keyboard, so it's remappable for anything - the shortcuts here just happen to target Codex on macOS.
+It's an unofficial USB shortcut controller, not a clone. It shows up as a plain keyboard, so it's remappable for anything - the shortcuts here target Codex on Windows by default.
 
 ![Six views of the finished DIY Codex Micro](images/codex-micro-views.jpg)
 
@@ -123,7 +123,7 @@ Rough cost in India (July 2026): **₹2,500–₹5,500**, excluding the printer,
 
 | Physical control | GPIO | Emits | Codex action |
 | --- | ---: | --- | --- |
-| Task 1–6 | 6, 10, 4, 7, 11, 14 | `Command+1` … `Command+6` | Select task 1–6 |
+| Task 1–6 | 6, 10, 4, 7, 11, 14 | `Control+1` … `Control+6` | Select task 1–6 |
 | Fast | 5 | `Shift+F20` | Fast mode |
 | Approve | 8 | `Control+F19` (700 ms hold) | Approve |
 | Reject | 12 | `Control+F20` | Reject |

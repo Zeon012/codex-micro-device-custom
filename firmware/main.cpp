@@ -1,7 +1,9 @@
 #include <Arduino.h>
 #include <Adafruit_NeoPixel.h>
+#include <Preferences.h>
 #include "USB.h"
 #include "USBHIDKeyboard.h"
+#include "USBHIDConsumerControl.h"
 
 #if ARDUINO_USB_MODE
 #error "USB HID requires native USB-OTG mode (ARDUINO_USB_MODE=0)."
@@ -16,7 +18,11 @@ constexpr bool kDiagnosticKeyTestMode = false;
 
 constexpr uint8_t kEncoderClkPin = 17;
 constexpr uint8_t kEncoderDtPin = 18;
-constexpr uint8_t kEncoderSwitchPin = 21;
+constexpr uint8_t kEncoderSwitchPin = 12;
+constexpr uint8_t kMatrixRows[] = {8, 9, 10, 11};
+constexpr uint8_t kMatrixColumns[] = {4, 5, 6, 7};
+constexpr uint8_t kMatrixRowCount = 4;
+constexpr uint8_t kMatrixColumnCount = 4;
 constexpr uint8_t kLedDataPin = 47;
 constexpr uint16_t kLedCount = 23;
 // Run the strip at full global brightness for maximum daytime visibility.
@@ -24,14 +30,48 @@ constexpr uint16_t kLedCount = 23;
 constexpr uint8_t kLedBrightness = 255;
 constexpr uint32_t kLedFrameIntervalMs = 25;
 constexpr uint8_t kReasoningLevelMax = 4;
+constexpr uint8_t kFnKey = 240;
+constexpr uint8_t kMediaKeyFirst = 241;
+constexpr uint8_t kMacroKeyFirst = 224;
+constexpr uint8_t kMacroSlotCount = 8;
+constexpr uint8_t kMacroStepCount = 8;
+constexpr uint8_t kQuickLinkKeyFirst = 232;
+constexpr uint8_t kQuickLinkCount = 8;
+constexpr uint8_t kComboPressIntervalMs = 8;
+constexpr uint8_t kHidLeftCtrl = 0xE0;
+constexpr uint8_t kHidLeftShift = 0xE1;
+constexpr uint8_t kHidLeftAlt = 0xE2;
+constexpr uint8_t kHidLeftGui = 0xE3;
+constexpr uint8_t kMacroPreferencesVersion = 2;
 
-constexpr uint8_t kEncoderClockwiseKey =
-    kDiagnosticKeyTestMode ? 'g' : KEY_F17;
-constexpr uint8_t kEncoderCounterClockwiseKey =
-    kDiagnosticKeyTestMode ? 'h' : KEY_F18;
-constexpr uint8_t kEncoderShortPressKey =
-    kDiagnosticKeyTestMode ? 'f' : KEY_F16;
-constexpr uint8_t kEncoderLongPressKey = KEY_F13;
+constexpr uint8_t kDefaultEncoderClockwiseKey =
+  kDiagnosticKeyTestMode ? 'g' : 0;
+constexpr uint8_t kDefaultEncoderCounterClockwiseKey =
+  kDiagnosticKeyTestMode ? 'h' : 0;
+constexpr uint8_t kDefaultEncoderShortPressKey =
+  kDiagnosticKeyTestMode ? 'f' : 0;
+constexpr uint8_t kDefaultEncoderLongPressKey = 0;
+
+uint8_t encoderClockwiseKey = kDefaultEncoderClockwiseKey;
+uint8_t encoderClockwiseModifier = 0;
+uint8_t encoderCounterClockwiseKey = kDefaultEncoderCounterClockwiseKey;
+uint8_t encoderCounterClockwiseModifier = 0;
+uint8_t layerEncoderClockwiseKey = kDefaultEncoderClockwiseKey;
+uint8_t layerEncoderClockwiseModifier = 0;
+uint8_t layerEncoderCounterClockwiseKey = kDefaultEncoderCounterClockwiseKey;
+uint8_t layerEncoderCounterClockwiseModifier = 0;
+bool functionLayerHeld = false;
+
+struct MacroStep {
+  uint8_t key = 0;
+  uint8_t modifier = 0;
+  uint16_t delayMs = 20;
+};
+
+MacroStep macroSteps[kMacroSlotCount][kMacroStepCount];
+uint8_t macroLengths[kMacroSlotCount] = {};
+
+void updateFunctionLayer();
 
 constexpr uint32_t kDebounceMs = 20;
 constexpr uint32_t kEncoderSwitchDebounceMs = 30;
@@ -44,6 +84,44 @@ constexpr int8_t kTransitionsPerDetent = 4;
 constexpr bool kReverseEncoderDirection = false;
 
 USBHIDKeyboard keyboard;
+USBHIDConsumerControl consumerControl;
+Preferences macroPreferences;
+bool keyTestEnabled = false;
+bool calibrationEnabled = false;
+bool calibrationRawState[kMatrixRowCount][kMatrixColumnCount] = {};
+bool calibrationStableState[kMatrixRowCount][kMatrixColumnCount] = {};
+uint32_t calibrationChangedAtMs[kMatrixRowCount][kMatrixColumnCount] = {};
+
+void emitKeyTest(uint8_t index, const char* event) {
+  if (keyTestEnabled) {
+    Serial.printf("KEYTEST,%u,%s\n", index, event);
+  }
+}
+
+void resetCalibrationState(uint32_t nowMs) {
+  for (uint8_t row = 0; row < kMatrixRowCount; ++row) {
+    for (uint8_t column = 0; column < kMatrixColumnCount; ++column) {
+      calibrationRawState[row][column] = false;
+      calibrationStableState[row][column] = false;
+      calibrationChangedAtMs[row][column] = nowMs;
+    }
+  }
+}
+
+void pollCalibrationCell(uint8_t row, uint8_t column, bool pressed,
+                         uint32_t nowMs) {
+  if (pressed != calibrationRawState[row][column]) {
+    calibrationRawState[row][column] = pressed;
+    calibrationChangedAtMs[row][column] = nowMs;
+  }
+  if (nowMs - calibrationChangedAtMs[row][column] >= kDebounceMs &&
+      calibrationStableState[row][column] != calibrationRawState[row][column]) {
+    calibrationStableState[row][column] = calibrationRawState[row][column];
+    Serial.printf("CAL,%u,%u,%s\n", row, column,
+                  pressed ? "DOWN" : "UP");
+  }
+}
+
 Adafruit_NeoPixel ledStrip(kLedCount, kLedDataPin, NEO_GRB + NEO_KHZ800);
 
 uint32_t nextLedFrameAtMs = 0;
@@ -158,25 +236,111 @@ void fillColor(Rgb color, uint8_t intensity = 255) {
   ledStrip.fill(scaledColor(color, intensity));
 }
 
-void pressKey(uint8_t key, uint8_t modifier = 0) {
-  if (modifier != 0) {
-    keyboard.press(modifier);
+uint16_t mediaUsage(uint8_t key) {
+  switch (key) {
+    case 241: return CONSUMER_CONTROL_PLAY_PAUSE;
+    case 242: return CONSUMER_CONTROL_SCAN_NEXT;
+    case 243: return CONSUMER_CONTROL_SCAN_PREVIOUS;
+    case 244: return CONSUMER_CONTROL_VOLUME_INCREMENT;
+    case 245: return CONSUMER_CONTROL_VOLUME_DECREMENT;
+    case 246: return CONSUMER_CONTROL_MUTE;
+    case 247: return CONSUMER_CONTROL_BRIGHTNESS_INCREMENT;
+    case 248: return CONSUMER_CONTROL_BRIGHTNESS_DECREMENT;
+    default: return 0;
   }
-  keyboard.press(key);
+}
+
+bool isMediaKey(uint8_t key) {
+  return key >= kMediaKeyFirst && key <= 248;
+}
+
+void pressModifiers(uint8_t modifier) {
+  if (modifier & 128) {
+    keyboard.pressRaw(kHidLeftCtrl);
+    delay(kComboPressIntervalMs);
+  }
+  if (modifier & 2) {
+    keyboard.pressRaw(kHidLeftShift);
+    delay(kComboPressIntervalMs);
+  }
+  if (modifier & 4) {
+    keyboard.pressRaw(kHidLeftAlt);
+    delay(kComboPressIntervalMs);
+  }
+  if (modifier & 8) {
+    keyboard.pressRaw(kHidLeftGui);
+    delay(kComboPressIntervalMs);
+  }
+}
+
+void releaseModifiers(uint8_t modifier) {
+  if (modifier & 8) {
+    keyboard.releaseRaw(kHidLeftGui);
+    delay(kComboPressIntervalMs);
+  }
+  if (modifier & 4) {
+    keyboard.releaseRaw(kHidLeftAlt);
+    delay(kComboPressIntervalMs);
+  }
+  if (modifier & 2) {
+    keyboard.releaseRaw(kHidLeftShift);
+    delay(kComboPressIntervalMs);
+  }
+  if (modifier & 128) {
+    keyboard.releaseRaw(kHidLeftCtrl);
+    delay(kComboPressIntervalMs);
+  }
+}
+
+void pressKey(uint8_t key, uint8_t modifier = 0) {
+  if (isMediaKey(key)) {
+    consumerControl.press(mediaUsage(key));
+    return;
+  }
+  if (modifier != 0) {
+    pressModifiers(modifier);
+  }
+  delay(kComboPressIntervalMs);
+  keyboard.pressRaw(key);
 }
 
 void releaseKey(uint8_t key, uint8_t modifier = 0) {
-  // USBHIDKeyboard updates its modifier bitmap without transmitting a report
-  // until a non-modifier key changes. Clear the modifier first, then release
-  // the key so the final report tells the host that both are up. Reversing
-  // this order can leave macOS believing Command or Shift is still held.
-  if (modifier != 0) {
-    keyboard.release(modifier);
+  if (isMediaKey(key)) {
+    consumerControl.release();
+    return;
   }
-  keyboard.release(key);
+  keyboard.releaseRaw(key);
+  delay(kComboPressIntervalMs);
+  if (modifier != 0) {
+    releaseModifiers(modifier);
+  }
 }
 
 void tapKey(uint8_t key, uint8_t modifier = 0) {
+  if (key >= kMacroKeyFirst && key < kMacroKeyFirst + kMacroSlotCount) {
+    const uint8_t slot = key - kMacroKeyFirst;
+    for (uint8_t index = 0; index < macroLengths[slot]; ++index) {
+      tapKey(macroSteps[slot][index].key, macroSteps[slot][index].modifier);
+      delay(macroSteps[slot][index].delayMs);
+    }
+    return;
+  }
+  if (key >= kQuickLinkKeyFirst && key < kQuickLinkKeyFirst + kQuickLinkCount) {
+    tapKey(27, 8);
+    delay(40);
+    switch (key - kQuickLinkKeyFirst) {
+      case 0: tapKey(12); break;
+      case 1: tapKey(4); break;
+      case 2: tapKey(23); break;
+      case 3: tapKey(14); break;
+      case 4: tapKey(16); break;
+      case 5: tapKey(10); break;
+      case 6: tapKey(8); break;
+      case 7: tapKey(21); break;
+      default: break;
+    }
+    return;
+  }
   pressKey(key, modifier);
   delay(5);
   releaseKey(key, modifier);
@@ -201,7 +365,64 @@ class DebouncedButton {
         primaryKey_(primaryKey),
         modifier_(modifier),
         longPressKey_(longPressKey),
+        basePrimaryKey_(primaryKey),
+        baseModifier_(modifier),
+        baseBehavior_(behavior),
+        baseLongPressKey_(longPressKey),
+        layerPrimaryKey_(primaryKey),
+        layerModifier_(modifier),
+        layerBehavior_(behavior),
+        layerLongPressKey_(longPressKey),
         debounceMs_(debounceMs) {}
+
+  void setMacro(uint8_t primaryKey, uint8_t modifier,
+                ButtonBehavior behavior, uint8_t longPressKey) {
+    basePrimaryKey_ = primaryKey;
+    baseModifier_ = modifier;
+    baseBehavior_ = behavior;
+    baseLongPressKey_ = longPressKey;
+    functionKey_ = primaryKey == kFnKey;
+    if (!functionLayerHeld) {
+      applyConfig(basePrimaryKey_, baseModifier_, baseBehavior_, baseLongPressKey_);
+    }
+  }
+
+  void setLayerMacro(uint8_t primaryKey, uint8_t modifier,
+                     ButtonBehavior behavior, uint8_t longPressKey) {
+    layerPrimaryKey_ = primaryKey;
+    layerModifier_ = modifier;
+    layerBehavior_ = behavior;
+    layerLongPressKey_ = longPressKey;
+    if (functionLayerHeld) {
+      applyConfig(layerPrimaryKey_, layerModifier_, layerBehavior_,
+                  layerLongPressKey_);
+    }
+  }
+
+  void applyLayer(bool layerActive) {
+    if (functionKey_) {
+      applyConfig(basePrimaryKey_, baseModifier_, baseBehavior_,
+                  baseLongPressKey_);
+      return;
+    }
+    if (layerActive) {
+      applyConfig(layerPrimaryKey_, layerModifier_, layerBehavior_,
+                  layerLongPressKey_);
+    } else {
+      applyConfig(basePrimaryKey_, baseModifier_, baseBehavior_,
+                  baseLongPressKey_);
+    }
+  }
+
+  uint8_t primaryKey() const { return primaryKey_; }
+  uint8_t modifier() const { return modifier_; }
+  ButtonBehavior behavior() const { return behavior_; }
+  uint8_t longPressKey() const { return longPressKey_; }
+  uint8_t layerPrimaryKey() const { return layerPrimaryKey_; }
+  uint8_t layerModifier() const { return layerModifier_; }
+  ButtonBehavior layerBehavior() const { return layerBehavior_; }
+  uint8_t layerLongPressKey() const { return layerLongPressKey_; }
+  void setTestIndex(uint8_t index) { testIndex_ = index; }
 
   void begin() {
     pinMode(pin_, INPUT_PULLUP);
@@ -210,8 +431,18 @@ class DebouncedButton {
     rawStateChangedAtMs_ = millis();
   }
 
+  void beginState() {
+    rawState_ = HIGH;
+    stableState_ = HIGH;
+    rawStateChangedAtMs_ = millis();
+  }
+
   void poll(uint32_t nowMs) {
-    const bool currentRawState = digitalRead(pin_);
+    pollState(digitalRead(pin_) == LOW, nowMs);
+  }
+
+  void pollState(bool pressed, uint32_t nowMs) {
+    const bool currentRawState = pressed ? LOW : HIGH;
 
     if (currentRawState != rawState_) {
       rawState_ = currentRawState;
@@ -243,7 +474,14 @@ class DebouncedButton {
     longPressTriggered_ = false;
     suppressEncoderPress_ =
         ledAction_ == LedAction::EncoderPress && encoderSteppedRecently(nowMs);
+    emitKeyTest(testIndex_, "DOWN");
     ledControlPressed(ledAction_, nowMs);
+
+    if (primaryKey_ == kFnKey) {
+      functionLayerHeld = true;
+      updateFunctionLayer();
+      return;
+    }
 
     if (behavior_ == ButtonBehavior::Tap) {
       tapKey(primaryKey_, modifier_);
@@ -259,6 +497,12 @@ class DebouncedButton {
   }
 
   void onReleased(uint32_t nowMs) {
+    emitKeyTest(testIndex_, "UP");
+    if (functionKey_) {
+      functionLayerHeld = false;
+      updateFunctionLayer();
+      return;
+    }
     if (behavior_ == ButtonBehavior::Hold) {
       if (ledAction_ == LedAction::PushToTalk) {
         if (pushToTalkPressCount > 0 && --pushToTalkPressCount == 0) {
@@ -298,11 +542,28 @@ class DebouncedButton {
 
   const uint8_t pin_;
   const LedAction ledAction_;
-  const ButtonBehavior behavior_;
-  const uint8_t primaryKey_;
-  const uint8_t modifier_;
-  const uint8_t longPressKey_;
+  ButtonBehavior behavior_;
+  uint8_t primaryKey_;
+  uint8_t modifier_;
+  uint8_t longPressKey_;
+  uint8_t basePrimaryKey_;
+  uint8_t baseModifier_;
+  ButtonBehavior baseBehavior_;
+  uint8_t baseLongPressKey_;
+  bool functionKey_ = false;
+  uint8_t layerPrimaryKey_ = 0;
+  uint8_t layerModifier_ = 0;
+  ButtonBehavior layerBehavior_ = ButtonBehavior::Tap;
+  uint8_t layerLongPressKey_ = 0;
   const uint32_t debounceMs_;
+
+  void applyConfig(uint8_t primaryKey, uint8_t modifier,
+                   ButtonBehavior behavior, uint8_t longPressKey) {
+    primaryKey_ = primaryKey;
+    modifier_ = modifier;
+    behavior_ = behavior;
+    longPressKey_ = longPressKey;
+  }
 
   bool rawState_ = HIGH;
   bool stableState_ = HIGH;
@@ -310,63 +571,99 @@ class DebouncedButton {
   bool suppressEncoderPress_ = false;
   uint32_t rawStateChangedAtMs_ = 0;
   uint32_t pressedAtMs_ = 0;
+  uint8_t testIndex_ = 255;
 };
 
 // Entries are in physical Key 1-13 order. The GPIO order below matches the
 // finished hand wiring as measured by the diagnostic qwertyuiopasd test; it is
-// intentionally not numerical. F14/F15 are avoided because macOS reserves
-// them for display brightness.
+// intentionally not numerical. F14/F15 are avoided because they may be
+// reserved by the host for display brightness.
 DebouncedButton buttons[] = {
     {6, LedAction::Task1, ButtonBehavior::Tap,
-     kDiagnosticKeyTestMode ? 'q' : '1',
-     kDiagnosticKeyTestMode ? 0 : KEY_LEFT_GUI},
+     kDiagnosticKeyTestMode ? 'q' : 0, 0},
     {10, LedAction::Task2, ButtonBehavior::Tap,
-     kDiagnosticKeyTestMode ? 'w' : '2',
-     kDiagnosticKeyTestMode ? 0 : KEY_LEFT_GUI},
+     kDiagnosticKeyTestMode ? 'w' : 0, 0},
     {4, LedAction::Task3, ButtonBehavior::Tap,
-     kDiagnosticKeyTestMode ? 'e' : '3',
-     kDiagnosticKeyTestMode ? 0 : KEY_LEFT_GUI},
+     kDiagnosticKeyTestMode ? 'e' : 0, 0},
     {7, LedAction::Task4, ButtonBehavior::Tap,
-     kDiagnosticKeyTestMode ? 'r' : '4',
-     kDiagnosticKeyTestMode ? 0 : KEY_LEFT_GUI},
+     kDiagnosticKeyTestMode ? 'r' : 0, 0},
     {11, LedAction::Task5, ButtonBehavior::Tap,
-     kDiagnosticKeyTestMode ? 't' : '5',
-     kDiagnosticKeyTestMode ? 0 : KEY_LEFT_GUI},
+     kDiagnosticKeyTestMode ? 't' : 0, 0},
     {14, LedAction::Task6, ButtonBehavior::Tap,
-     kDiagnosticKeyTestMode ? 'y' : '6',
-     kDiagnosticKeyTestMode ? 0 : KEY_LEFT_GUI},
+     kDiagnosticKeyTestMode ? 'y' : 0, 0},
     {5, LedAction::FastMode, ButtonBehavior::Tap,
-     kDiagnosticKeyTestMode ? 'u' : KEY_F20,
-     kDiagnosticKeyTestMode ? 0 : KEY_LEFT_SHIFT},
+     kDiagnosticKeyTestMode ? 'u' : 0, 0},
     {8, LedAction::Approve,
-     kDiagnosticKeyTestMode ? ButtonBehavior::Tap
-                            : ButtonBehavior::LongPress,
-     kDiagnosticKeyTestMode ? 'i' : KEY_F19,
-     kDiagnosticKeyTestMode ? 0 : KEY_LEFT_CTRL},
+     ButtonBehavior::Tap, kDiagnosticKeyTestMode ? 'i' : 0, 0},
     {12, LedAction::Reject, ButtonBehavior::Tap,
-     kDiagnosticKeyTestMode ? 'o' : KEY_F20,
-     kDiagnosticKeyTestMode ? 0 : KEY_LEFT_CTRL},
+     kDiagnosticKeyTestMode ? 'o' : 0, 0},
     {15, LedAction::ContinueTask, ButtonBehavior::Tap,
-     kDiagnosticKeyTestMode ? 'p' : KEY_F19,
-     kDiagnosticKeyTestMode ? 0 : KEY_LEFT_SHIFT},
+     kDiagnosticKeyTestMode ? 'p' : 0, 0},
     {9, LedAction::PushToTalk,
-     kDiagnosticKeyTestMode ? ButtonBehavior::Tap : ButtonBehavior::Hold,
-     kDiagnosticKeyTestMode ? 'a' : KEY_F13,
-     kDiagnosticKeyTestMode ? 0 : KEY_LEFT_CTRL},
+     ButtonBehavior::Tap, kDiagnosticKeyTestMode ? 'a' : 0, 0},
     {13, LedAction::PushToTalk,
-     kDiagnosticKeyTestMode ? ButtonBehavior::Tap : ButtonBehavior::Hold,
-     kDiagnosticKeyTestMode ? 's' : KEY_F13,
-     kDiagnosticKeyTestMode ? 0 : KEY_LEFT_CTRL},
+     ButtonBehavior::Tap, kDiagnosticKeyTestMode ? 's' : 0, 0},
     {16, LedAction::Submit, ButtonBehavior::Tap,
-     kDiagnosticKeyTestMode ? 'd' : KEY_F20},
+     kDiagnosticKeyTestMode ? 'd' : 0},
 };
 
 DebouncedButton encoderSwitch(
     kEncoderSwitchPin, LedAction::EncoderPress,
     kDiagnosticKeyTestMode ? ButtonBehavior::Tap
                            : ButtonBehavior::ShortAndLongPress,
-    kEncoderShortPressKey, 0, kEncoderLongPressKey,
+    kDefaultEncoderShortPressKey, 0, kDefaultEncoderLongPressKey,
     kEncoderSwitchDebounceMs);
+
+// Matrix positions follow the physical plate: encoder/blank, keys 1-2 on the
+// top; keys 3-6; action row; microphone pair and send on the bottom.
+DebouncedButton* matrixButtons[kMatrixRowCount][kMatrixColumnCount] = {
+    {nullptr, &buttons[0], &buttons[1], nullptr},
+    {&buttons[2], &buttons[3], &buttons[4], &buttons[5]},
+    {&buttons[6], &buttons[7], &buttons[8], &buttons[9]},
+  {nullptr, &buttons[11], &buttons[10], &buttons[12]},
+};
+
+void beginMatrix() {
+  for (uint8_t row : kMatrixRows) {
+    pinMode(row, OUTPUT);
+    digitalWrite(row, HIGH);
+  }
+  for (uint8_t column : kMatrixColumns) {
+    pinMode(column, INPUT_PULLUP);
+  }
+}
+
+void pollMatrix(uint32_t nowMs) {
+  for (uint8_t rowIndex = 0; rowIndex < kMatrixRowCount; ++rowIndex) {
+    for (uint8_t row : kMatrixRows) {
+      digitalWrite(row, HIGH);
+    }
+    digitalWrite(kMatrixRows[rowIndex], LOW);
+    delayMicroseconds(30);
+    for (uint8_t columnIndex = 0; columnIndex < kMatrixColumnCount;
+         ++columnIndex) {
+      const bool pressed =
+          digitalRead(kMatrixColumns[columnIndex]) == LOW;
+      if (calibrationEnabled) {
+        pollCalibrationCell(rowIndex, columnIndex, pressed, nowMs);
+      } else if (matrixButtons[rowIndex][columnIndex] != nullptr) {
+        DebouncedButton* button = matrixButtons[rowIndex][columnIndex];
+        button->pollState(digitalRead(kMatrixColumns[columnIndex]) == LOW,
+                          nowMs);
+      }
+    }
+  }
+  for (uint8_t row : kMatrixRows) {
+    digitalWrite(row, HIGH);
+  }
+}
+
+void updateFunctionLayer() {
+  for (DebouncedButton& button : buttons) {
+    button.applyLayer(functionLayerHeld);
+  }
+  encoderSwitch.applyLayer(functionLayerHeld);
+}
 
 // Each entry describes one transition between the encoder's two-bit Gray-code
 // states. Invalid transitions and contact bounce contribute zero movement.
@@ -393,8 +690,15 @@ void sendEncoderStep(bool clockwise, uint32_t nowMs) {
 
   encoderHasStepped = true;
   lastEncoderStepAtMs = nowMs;
-  tapKey(clockwise ? kEncoderClockwiseKey
-                   : kEncoderCounterClockwiseKey);
+  emitKeyTest(clockwise ? 14 : 15, clockwise ? "CW" : "CCW");
+    tapKey(clockwise ? (functionLayerHeld ? layerEncoderClockwiseKey
+                                          : encoderClockwiseKey)
+                     : (functionLayerHeld ? layerEncoderCounterClockwiseKey
+                                           : encoderCounterClockwiseKey),
+           clockwise ? (functionLayerHeld ? layerEncoderClockwiseModifier
+                                          : encoderClockwiseModifier)
+                     : (functionLayerHeld ? layerEncoderCounterClockwiseModifier
+                                           : encoderCounterClockwiseModifier));
 
   if (clockwise && reasoningLevel < kReasoningLevelMax) {
     ++reasoningLevel;
@@ -414,6 +718,9 @@ void pollEncoder(uint32_t nowMs) {
       static_cast<uint8_t>((previousEncoderState << 2) | currentEncoderState);
   previousEncoderState = currentEncoderState;
   const int8_t movement = kEncoderTransitionTable[transition];
+  if (movement != 0 && keyTestEnabled) {
+    emitKeyTest(movement > 0 ? 14 : 15, "STEP");
+  }
   encoderTransitionCount += movement;
 
   if (encoderTransitionCount >= kTransitionsPerDetent) {
@@ -634,12 +941,334 @@ void pollLedAnimation(uint32_t nowMs) {
   ledStrip.show();
 }
 
+constexpr uint8_t kMacroCount = 16;
+String serialCommand;
+
+DebouncedButton& macroButton(uint8_t index) {
+  return index < 13 ? buttons[index] : encoderSwitch;
+}
+
+void printMacro(uint8_t layer, uint8_t index) {
+  if (index == 14) {
+    Serial.printf("CFG,%u,%u,%u,%u,0,0\n", layer, index,
+                  layer ? layerEncoderClockwiseKey : encoderClockwiseKey,
+                  layer ? layerEncoderClockwiseModifier : encoderClockwiseModifier);
+    return;
+  }
+  if (index == 15) {
+    Serial.printf("CFG,%u,%u,%u,%u,0,0\n", layer, index,
+                  layer ? layerEncoderCounterClockwiseKey : encoderCounterClockwiseKey,
+                  layer ? layerEncoderCounterClockwiseModifier : encoderCounterClockwiseModifier);
+    return;
+  }
+  DebouncedButton& button = macroButton(index);
+  Serial.printf("CFG,%u,%u,%u,%u,%u,%u\n", layer, index,
+                layer ? button.layerPrimaryKey() : button.primaryKey(),
+                layer ? button.layerModifier() : button.modifier(),
+                static_cast<uint8_t>(layer ? button.layerBehavior() : button.behavior()),
+                layer ? button.layerLongPressKey() : button.longPressKey());
+}
+
+void printAllMacros(uint8_t layer) {
+  for (uint8_t index = 0; index < kMacroCount; ++index) {
+    printMacro(layer, index);
+  }
+  Serial.println("END");
+}
+
+void saveMacros() {
+  macroPreferences.begin("macros", false);
+  macroPreferences.putUChar("version", kMacroPreferencesVersion);
+  for (uint8_t index = 0; index < kMacroCount; ++index) {
+    char key[8];
+    if (index == 14 || index == 15) {
+      snprintf(key, sizeof(key), "k%u", index);
+      macroPreferences.putUChar(
+          key, index == 14 ? encoderClockwiseKey : encoderCounterClockwiseKey);
+      snprintf(key, sizeof(key), "m%u", index);
+      macroPreferences.putUChar(
+          key, index == 14 ? encoderClockwiseModifier
+                           : encoderCounterClockwiseModifier);
+        snprintf(key, sizeof(key), "xk%u", index);
+        macroPreferences.putUChar(
+          key, index == 14 ? layerEncoderClockwiseKey
+                   : layerEncoderCounterClockwiseKey);
+        snprintf(key, sizeof(key), "xm%u", index);
+        macroPreferences.putUChar(
+          key, index == 14 ? layerEncoderClockwiseModifier
+                   : layerEncoderCounterClockwiseModifier);
+      continue;
+    }
+    DebouncedButton& button = macroButton(index);
+    snprintf(key, sizeof(key), "k%u", index);
+    macroPreferences.putUChar(key, button.primaryKey());
+    snprintf(key, sizeof(key), "m%u", index);
+    macroPreferences.putUChar(key, button.modifier());
+    snprintf(key, sizeof(key), "b%u", index);
+    macroPreferences.putUChar(key, static_cast<uint8_t>(button.behavior()));
+    snprintf(key, sizeof(key), "l%u", index);
+    macroPreferences.putUChar(key, button.longPressKey());
+    snprintf(key, sizeof(key), "xk%u", index);
+    macroPreferences.putUChar(key, button.layerPrimaryKey());
+    snprintf(key, sizeof(key), "xm%u", index);
+    macroPreferences.putUChar(key, button.layerModifier());
+    snprintf(key, sizeof(key), "xb%u", index);
+    macroPreferences.putUChar(key, static_cast<uint8_t>(button.layerBehavior()));
+    snprintf(key, sizeof(key), "xl%u", index);
+    macroPreferences.putUChar(key, button.layerLongPressKey());
+  }
+  for (uint8_t slot = 0; slot < kMacroSlotCount; ++slot) {
+    char key[12];
+    snprintf(key, sizeof(key), "mn%u", slot);
+    macroPreferences.putUChar(key, macroLengths[slot]);
+    for (uint8_t step = 0; step < kMacroStepCount; ++step) {
+      snprintf(key, sizeof(key), "mk%u_%u", slot, step);
+      macroPreferences.putUChar(key, macroSteps[slot][step].key);
+      snprintf(key, sizeof(key), "mm%u_%u", slot, step);
+      macroPreferences.putUChar(key, macroSteps[slot][step].modifier);
+      snprintf(key, sizeof(key), "md%u_%u", slot, step);
+      macroPreferences.putUShort(key, macroSteps[slot][step].delayMs);
+    }
+  }
+  macroPreferences.end();
+  Serial.println("OK,SAVED");
+}
+
+void loadMacros() {
+  macroPreferences.begin("macros", true);
+  if (macroPreferences.getUChar("version", 0) != kMacroPreferencesVersion) {
+    macroPreferences.end();
+    return;
+  }
+  for (uint8_t index = 0; index < kMacroCount; ++index) {
+    char key[8];
+    snprintf(key, sizeof(key), "k%u", index);
+    const uint8_t primaryKey = macroPreferences.getUChar(key, 0);
+    snprintf(key, sizeof(key), "m%u", index);
+    const uint8_t modifier = macroPreferences.getUChar(key, 0);
+    snprintf(key, sizeof(key), "b%u", index);
+    const uint8_t behavior = macroPreferences.getUChar(key, 0);
+    snprintf(key, sizeof(key), "l%u", index);
+    const uint8_t longPressKey = macroPreferences.getUChar(key, 0);
+    snprintf(key, sizeof(key), "xk%u", index);
+    const uint8_t layerPrimaryKey = macroPreferences.getUChar(key, primaryKey);
+    snprintf(key, sizeof(key), "xm%u", index);
+    const uint8_t layerModifier = macroPreferences.getUChar(key, modifier);
+    snprintf(key, sizeof(key), "xb%u", index);
+    const uint8_t layerBehavior = macroPreferences.getUChar(key, behavior);
+    snprintf(key, sizeof(key), "xl%u", index);
+    const uint8_t layerLongPressKey = macroPreferences.getUChar(key, longPressKey);
+    if (index == 14) {
+      encoderClockwiseKey = primaryKey;
+      encoderClockwiseModifier = modifier;
+      layerEncoderClockwiseKey = layerPrimaryKey;
+      layerEncoderClockwiseModifier = layerModifier;
+      continue;
+    }
+    if (index == 15) {
+      encoderCounterClockwiseKey = primaryKey;
+      encoderCounterClockwiseModifier = modifier;
+      layerEncoderCounterClockwiseKey = layerPrimaryKey;
+      layerEncoderCounterClockwiseModifier = layerModifier;
+      continue;
+    }
+    if (behavior <= static_cast<uint8_t>(ButtonBehavior::ShortAndLongPress)) {
+      macroButton(index).setMacro(primaryKey, modifier,
+                                  static_cast<ButtonBehavior>(behavior),
+                                  longPressKey);
+      if (layerBehavior <= static_cast<uint8_t>(ButtonBehavior::ShortAndLongPress)) {
+        macroButton(index).setLayerMacro(
+        layerPrimaryKey, layerModifier,
+        static_cast<ButtonBehavior>(layerBehavior), layerLongPressKey);
+      }
+    }
+  }
+  for (uint8_t slot = 0; slot < kMacroSlotCount; ++slot) {
+    char key[12];
+    snprintf(key, sizeof(key), "mn%u", slot);
+    macroLengths[slot] = macroPreferences.getUChar(key, 0);
+    if (macroLengths[slot] > kMacroStepCount) macroLengths[slot] = kMacroStepCount;
+    for (uint8_t step = 0; step < kMacroStepCount; ++step) {
+      snprintf(key, sizeof(key), "mk%u_%u", slot, step);
+      macroSteps[slot][step].key = macroPreferences.getUChar(key, 0);
+      snprintf(key, sizeof(key), "mm%u_%u", slot, step);
+      macroSteps[slot][step].modifier = macroPreferences.getUChar(key, 0);
+      snprintf(key, sizeof(key), "md%u_%u", slot, step);
+      macroSteps[slot][step].delayMs = macroPreferences.getUShort(key, 20);
+    }
+  }
+  macroPreferences.end();
+}
+
+void printMacroDefinitions() {
+  for (uint8_t slot = 0; slot < kMacroSlotCount; ++slot) {
+    Serial.printf("MCR,%u,%u", slot, macroLengths[slot]);
+    for (uint8_t step = 0; step < macroLengths[slot]; ++step) {
+      Serial.printf(",%u,%u,%u", macroSteps[slot][step].key,
+                    macroSteps[slot][step].modifier,
+                    macroSteps[slot][step].delayMs);
+    }
+    Serial.println();
+  }
+  Serial.println("MEND");
+}
+
+void processMacroDefinition(const String& command) {
+  char buffer[220];
+  command.toCharArray(buffer, sizeof(buffer));
+  char* token = strtok(buffer, ",");
+  if (!token || strcmp(token, "MACRO") != 0) return;
+  token = strtok(nullptr, ",");
+  const int slot = token ? atoi(token) : -1;
+  token = strtok(nullptr, ",");
+  const int count = token ? atoi(token) : -1;
+  if (slot < 0 || slot >= kMacroSlotCount || count < 0 ||
+      count > kMacroStepCount) {
+    Serial.println("ERR,MACRO");
+    return;
+  }
+  for (int step = 0; step < count; ++step) {
+    char* keyToken = strtok(nullptr, ",");
+    char* modifierToken = strtok(nullptr, ",");
+    char* delayToken = strtok(nullptr, ",");
+    if (!keyToken || !modifierToken || !delayToken) {
+      Serial.println("ERR,MACRO");
+      return;
+    }
+    macroSteps[slot][step].key = static_cast<uint8_t>(atoi(keyToken));
+    macroSteps[slot][step].modifier = static_cast<uint8_t>(atoi(modifierToken));
+    macroSteps[slot][step].delayMs = static_cast<uint16_t>(atoi(delayToken));
+  }
+  macroLengths[slot] = static_cast<uint8_t>(count);
+  Serial.println("OK,MACRO");
+}
+
+void processSerialCommand(const String& command) {
+  if (command == "GET") {
+    printAllMacros(0);
+    return;
+  }
+  if (command == "GET,1") {
+    printAllMacros(1);
+    return;
+  }
+  if (command == "SAVE") {
+    saveMacros();
+    return;
+  }
+  if (command == "GETMACROS") {
+    printMacroDefinitions();
+    return;
+  }
+  if (command == "KEYTEST,1" || command == "KEYTEST,0") {
+    keyTestEnabled = command.endsWith(",1");
+    if (keyTestEnabled) calibrationEnabled = false;
+    Serial.printf("OK,KEYTEST,%u\n", keyTestEnabled ? 1 : 0);
+    return;
+  }
+  if (command == "CAL,1" || command == "CAL,0") {
+    calibrationEnabled = command.endsWith(",1");
+    if (calibrationEnabled) {
+      keyTestEnabled = false;
+      resetCalibrationState(millis());
+    }
+    Serial.printf("OK,CAL,%u\n", calibrationEnabled ? 1 : 0);
+    return;
+  }
+  if (command.startsWith("MACRO,")) {
+    processMacroDefinition(command);
+    return;
+  }
+  if (command.startsWith("TEST,")) {
+    const int index = command.substring(5).toInt();
+    if (index >= 0 && index < kMacroCount) {
+      if (index == 14 || index == 15) {
+        tapKey(index == 14 ? encoderClockwiseKey : encoderCounterClockwiseKey,
+               index == 14 ? encoderClockwiseModifier
+                            : encoderCounterClockwiseModifier);
+        Serial.println("OK,TEST");
+        return;
+      }
+      DebouncedButton& button = macroButton(static_cast<uint8_t>(index));
+      tapKey(button.primaryKey(), button.modifier());
+      Serial.println("OK,TEST");
+    }
+    return;
+  }
+  const bool layerCommand = command.startsWith("SETL,1,");
+  if (!command.startsWith("SET,") && !layerCommand) {
+    return;
+  }
+
+  int index = -1;
+  int primaryKey = 0;
+  int modifier = 0;
+  int behavior = 0;
+  int longPressKey = 0;
+  const char* setFormat = layerCommand ? "SETL,1,%d,%d,%d,%d,%d"
+                                       : "SET,%d,%d,%d,%d,%d";
+  if (sscanf(command.c_str(), setFormat, &index, &primaryKey,
+             &modifier, &behavior, &longPressKey) != 5 || index < 0 ||
+      index >= kMacroCount || primaryKey < 0 || primaryKey > 255 ||
+      modifier < 0 || modifier > 255 || behavior < 0 || behavior > 3 ||
+      longPressKey < 0 || longPressKey > 255) {
+    Serial.println("ERR,INVALID");
+    return;
+  }
+  if (layerCommand && index == 14) {
+    layerEncoderClockwiseKey = static_cast<uint8_t>(primaryKey);
+    layerEncoderClockwiseModifier = static_cast<uint8_t>(modifier);
+  } else if (layerCommand && index == 15) {
+    layerEncoderCounterClockwiseKey = static_cast<uint8_t>(primaryKey);
+    layerEncoderCounterClockwiseModifier = static_cast<uint8_t>(modifier);
+  } else if (layerCommand) {
+    macroButton(static_cast<uint8_t>(index))
+        .setLayerMacro(static_cast<uint8_t>(primaryKey),
+                       static_cast<uint8_t>(modifier),
+                       static_cast<ButtonBehavior>(behavior),
+                       static_cast<uint8_t>(longPressKey));
+  } else if (index == 14) {
+    encoderClockwiseKey = static_cast<uint8_t>(primaryKey);
+    encoderClockwiseModifier = static_cast<uint8_t>(modifier);
+  } else if (index == 15) {
+    encoderCounterClockwiseKey = static_cast<uint8_t>(primaryKey);
+    encoderCounterClockwiseModifier = static_cast<uint8_t>(modifier);
+  } else {
+    macroButton(static_cast<uint8_t>(index))
+        .setMacro(static_cast<uint8_t>(primaryKey),
+                  static_cast<uint8_t>(modifier),
+                  static_cast<ButtonBehavior>(behavior),
+                  static_cast<uint8_t>(longPressKey));
+  }
+  Serial.println("OK,SET");
+}
+
+void pollSerial() {
+  while (Serial.available() > 0) {
+    const char character = static_cast<char>(Serial.read());
+    if (character == '\n' || character == '\r') {
+      if (serialCommand.length() > 0) {
+        processSerialCommand(serialCommand);
+        serialCommand = "";
+      }
+    } else if (serialCommand.length() < 80) {
+      serialCommand += character;
+    }
+  }
+}
+
 }  // namespace
 
 void setup() {
-  for (DebouncedButton& button : buttons) {
-    button.begin();
+  Serial.begin(115200);
+  loadMacros();
+  for (uint8_t index = 0; index < 13; ++index) {
+    DebouncedButton& button = buttons[index];
+    button.setTestIndex(index);
+    button.beginState();
   }
+  beginMatrix();
+  encoderSwitch.setTestIndex(13);
   encoderSwitch.begin();
 
   pinMode(kEncoderClkPin, INPUT_PULLUP);
@@ -647,6 +1276,7 @@ void setup() {
   previousEncoderState = readEncoderState();
 
   keyboard.begin();
+  consumerControl.begin();
   USB.begin();
   beginLedAnimation();
 }
@@ -654,9 +1284,8 @@ void setup() {
 void loop() {
   const uint32_t nowMs = millis();
 
-  for (DebouncedButton& button : buttons) {
-    button.poll(nowMs);
-  }
+  pollSerial();
+  pollMatrix(nowMs);
   pollEncoder(nowMs);
   encoderSwitch.poll(nowMs);
   pollLedAnimation(nowMs);

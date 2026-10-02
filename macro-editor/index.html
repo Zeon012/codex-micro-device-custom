@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Codex Micro Macro Editor</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">ESP32-S3 / USB HID</p>
+        <h1>Macro editor</h1>
+        <p class="subtitle">Tune the pad without rebuilding firmware.</p>
+      </div>
+      <div class="connection">
+        <span id="statusDot" class="status-dot"></span>
+        <span id="statusText">Disconnected</span>
+        <button id="connectButton" class="button button-primary">Connect device</button>
+        <button id="saveButton" class="button button-accent" disabled>Save</button>
+        <button id="resetButton" class="button button-quiet">Reset</button>
+      </div>
+    </header>
+
+    <nav class="via-nav" aria-label="Editor navigation">
+      <span class="via-brand">MACRO PAD</span>
+      <button class="via-tab active" data-layer="0">Keymap 0</button>
+      <button class="via-tab" data-layer="1">Keymap 1</button>
+      <button class="via-tab">Lighting</button>
+      <span class="via-spacer"></span>
+      <span class="via-meta">ESP32-S3 · WINDOWS</span>
+    </nav>
+
+    <section class="keymap-workbench">
+      <div class="keymap-panel">
+        <div class="panel-heading"><span>Keymap</span><span class="panel-hint">Select a control</span></div>
+        <div id="keymapPreview" class="keymap-preview"></div>
+      </div>
+      <aside class="inspector-panel">
+        <span class="section-kicker">Selected control</span>
+        <h2 id="selectedName">Task 1</h2>
+        <p id="selectedSummary">Ctrl + 1</p>
+        <p class="inspector-help">Select a key below to assign it.</p>
+        <button id="selectedTest" class="button button-primary">Test selected</button>
+        <button id="editMacroButton" class="button button-quiet" hidden>Edit macro</button>
+        <section class="key-tester" aria-label="Key tester">
+          <div class="tester-heading"><span class="section-kicker">Key tester</span><button id="keyTesterClear" class="tester-clear">Clear</button></div>
+          <button id="keyTesterToggle" class="button button-quiet" disabled>Start tester</button>
+          <ol id="keyTesterLog" class="tester-log" aria-live="polite"></ol>
+          <div class="calibration-heading"><span class="section-kicker">Matrix calibration</span><button id="calibrationClear" class="tester-clear">Clear</button></div>
+          <button id="calibrationToggle" class="button button-quiet" disabled>Start calibration</button>
+          <p id="calibrationStatus" class="calibration-status">Press each switch in order.</p>
+          <ol id="calibrationLog" class="tester-log calibration-log" aria-live="polite"></ol>
+        </section>
+      </aside>
+    </section>
+
+    <section class="palette" aria-label="Key palette">
+      <nav class="palette-rail">
+        <button class="palette-category active" data-category="BASIC">BASIC</button>
+        <button class="palette-category" data-category="MEDIA">MEDIA</button>
+        <button class="palette-category" data-category="MACRO">MACRO</button>
+        <button class="palette-category" data-category="LAYERS">LAYERS</button>
+        <button class="palette-category" data-category="SPECIAL">SPECIAL</button>
+        <button class="palette-category" data-category="LIGHTING">LIGHTING</button>
+        <button class="palette-category" data-category="QUICKLINK">QUICKLINK</button>
+        <button class="palette-category" data-category="APPS">MS APPS</button>
+      </nav>
+      <div class="palette-keys">
+        <button class="palette-key">None</button><button class="palette-key">Esc</button><button class="palette-key">Tab</button><button class="palette-key">Enter</button><button class="palette-key">Space</button><button class="palette-key">Backspace</button><button class="palette-key">Delete</button>
+        <button class="palette-key">Ctrl</button><button class="palette-key">Shift</button><button class="palette-key">Alt</button><button class="palette-key">Win</button><button class="palette-key">Fn</button><button class="palette-key">F1</button><button class="palette-key">F2</button><button class="palette-key">F3</button><button class="palette-key">F4</button><button class="palette-key">F5</button><button class="palette-key">F6</button><button class="palette-key">F7</button><button class="palette-key">F8</button><button class="palette-key">F9</button><button class="palette-key">F10</button><button class="palette-key">F11</button><button class="palette-key">F12</button><button class="palette-key">F13</button><button class="palette-key">F14</button><button class="palette-key">F15</button><button class="palette-key">F16</button><button class="palette-key">F17</button><button class="palette-key">F18</button><button class="palette-key">F19</button><button class="palette-key">F20</button>
+        <button class="palette-key">A</button><button class="palette-key">B</button><button class="palette-key">C</button><button class="palette-key">D</button><button class="palette-key">E</button><button class="palette-key">F</button><button class="palette-key">G</button><button class="palette-key">H</button><button class="palette-key">I</button><button class="palette-key">J</button><button class="palette-key">K</button><button class="palette-key">L</button><button class="palette-key">M</button><button class="palette-key">N</button><button class="palette-key">O</button><button class="palette-key">P</button><button class="palette-key">Q</button><button class="palette-key">R</button><button class="palette-key">S</button><button class="palette-key">T</button><button class="palette-key">U</button><button class="palette-key">V</button><button class="palette-key">W</button><button class="palette-key">X</button><button class="palette-key">Y</button><button class="palette-key">Z</button>
+      </div>
+    </section>
+
+    <span id="dirtyState" class="save-state dirty-indicator">All changes saved</span>
+
+    <section class="device-stage" aria-label="Device preview">
+      <div class="stage-copy">
+        <span class="section-kicker">Hardware map</span>
+        <h2>Every control, one profile.</h2>
+        <p>The six task keys sit above the action row. The encoder handles rotation, press, and long press independently.</p>
+      </div>
+      <div class="pad-preview">
+        <div class="preview-keys">
+          <span class="preview-key task">1</span><span class="preview-key task">2</span><span class="preview-key task">3</span><span class="preview-key task">4</span><span class="preview-key task">5</span><span class="preview-key task">6</span>
+          <span class="preview-key action">⚡</span><span class="preview-key action">✓</span><span class="preview-key action">✕</span><span class="preview-key action">↗</span><span class="preview-key action">MIC</span><span class="preview-key action">⚙</span>
+        </div>
+        <div class="preview-encoder"><span class="encoder-arrow">CW</span><span class="encoder-cap">F</span><span class="encoder-label">ENCODER</span></div>
+      </div>
+    </section>
+
+    <dialog id="macroDialog" class="macro-dialog">
+      <form method="dialog" class="macro-dialog-card">
+        <div class="tester-heading"><span class="section-kicker">Edit macro</span><button value="cancel" class="tester-clear">Close</button></div>
+        <div class="macro-modes" role="tablist" aria-label="Macro mode">
+          <button type="button" class="macro-mode active" data-macro-mode="text">Text</button>
+          <button type="button" class="macro-mode" data-macro-mode="combo">Key combo</button>
+        </div>
+        <label id="macroInputLabel" class="macro-input-label" for="macroInput">Text string</label>
+        <input id="macroInput" class="macro-input" autocomplete="off" placeholder="Example: hello">
+        <p id="macroInputHint" class="macro-input-hint">Short text is converted into individual key presses.</p>
+        <div class="macro-dialog-actions">
+          <button type="button" id="macroCancel" class="button button-quiet">Cancel</button>
+          <button type="button" id="macroSave" class="button button-accent">Save macro</button>
+        </div>
+      </form>
+    </dialog>
+
+    <footer>
+      <span>Web Serial requires Chrome or Edge over localhost.</span>
+      <span id="portName">No device selected</span>
+    </footer>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>

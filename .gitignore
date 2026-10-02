@@ -1,0 +1,4 @@
+firmware/.pio/
+macro-editor/node_modules/
+macro-editor/dist/
+macro-editor/dist-*/
