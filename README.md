@@ -20,11 +20,7 @@ This fork is based on the original [codex-micro-device](https://github.com/Nishk
 
 ![Switches and rotary encoder](images/collage-switches.jpg)
 
-![Matrix and wiring work](images/collage-wiring.jpg)
-
 ![Printed keycaps](images/collage-keycaps.jpg)
-
-![Wiring process](images/process/20260721_090859.jpg)
 
 ## What Changed From Upstream
 
