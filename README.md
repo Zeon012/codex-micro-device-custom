@@ -4,6 +4,28 @@ A configurable ESP32-S3 macropad with a 4x4 diode matrix, rotary encoder, USB HI
 
 This fork is based on the original [codex-micro-device](https://github.com/Nishkalkashyap/codex-micro-device) project. The source here has been adapted for the current rewired hardware and a live configuration workflow.
 
+## Pad Photos
+
+![Codex Micro macropad](images/codex-micro-header.jpg)
+
+![Six views of the finished macropad](images/codex-micro-views.jpg)
+
+![Finished enclosure and USB pedestal](images/collage-finished.jpg)
+
+![RGB lighting demo](images/rgb-demo.gif)
+
+## Build Photos
+
+![Enclosure design and printed parts](images/collage-enclosure.jpg)
+
+![Switches and rotary encoder](images/collage-switches.jpg)
+
+![Matrix and wiring work](images/collage-wiring.jpg)
+
+![Printed keycaps](images/collage-keycaps.jpg)
+
+![Wiring process](images/process/20260721_090859.jpg)
+
 ## What Changed From Upstream
 
 - Replaced the original one-GPIO-per-switch wiring with a 4x4 diode matrix.
