@@ -677,11 +677,21 @@ constexpr int8_t kEncoderTransitionTable[16] = {
 
 uint8_t previousEncoderState = 0;
 int8_t encoderTransitionCount = 0;
+volatile int16_t encoderPendingMovement = 0;
 
 uint8_t readEncoderState() {
   const uint8_t clk = digitalRead(kEncoderClkPin) == HIGH ? 1 : 0;
   const uint8_t dt = digitalRead(kEncoderDtPin) == HIGH ? 1 : 0;
   return static_cast<uint8_t>((clk << 1) | dt);
+}
+
+void IRAM_ATTR handleEncoderChange() {
+  const uint8_t currentState = readEncoderState();
+  const uint8_t transition =
+      static_cast<uint8_t>((previousEncoderState << 2) | currentState);
+  const int8_t movement = kEncoderTransitionTable[transition];
+  previousEncoderState = currentState;
+  encoderPendingMovement += movement;
 }
 
 void sendEncoderStep(bool clockwise, uint32_t nowMs) {
@@ -710,26 +720,24 @@ void sendEncoderStep(bool clockwise, uint32_t nowMs) {
 }
 
 void pollEncoder(uint32_t nowMs) {
-  const uint8_t currentEncoderState = readEncoderState();
-  if (currentEncoderState == previousEncoderState) {
-    return;
-  }
+  noInterrupts();
+  const int16_t pendingMovement = encoderPendingMovement;
+  encoderPendingMovement = 0;
+  interrupts();
 
-  const uint8_t transition =
-      static_cast<uint8_t>((previousEncoderState << 2) | currentEncoderState);
-  previousEncoderState = currentEncoderState;
-  const int8_t movement = kEncoderTransitionTable[transition];
-  if (movement != 0 && keyTestEnabled) {
-    emitKeyTest(movement > 0 ? 14 : 15, "STEP");
-  }
-  encoderTransitionCount += movement;
-
-  if (encoderTransitionCount >= kTransitionsPerDetent) {
-    encoderTransitionCount = 0;
-    sendEncoderStep(true, nowMs);
-  } else if (encoderTransitionCount <= -kTransitionsPerDetent) {
-    encoderTransitionCount = 0;
-    sendEncoderStep(false, nowMs);
+  const int8_t direction = pendingMovement >= 0 ? 1 : -1;
+  for (int16_t index = 0; index < abs(pendingMovement); ++index) {
+    if (keyTestEnabled) {
+      emitKeyTest(direction > 0 ? 14 : 15, "STEP");
+    }
+    encoderTransitionCount += direction;
+    if (encoderTransitionCount >= kTransitionsPerDetent) {
+      encoderTransitionCount = 0;
+      sendEncoderStep(true, nowMs);
+    } else if (encoderTransitionCount <= -kTransitionsPerDetent) {
+      encoderTransitionCount = 0;
+      sendEncoderStep(false, nowMs);
+    }
   }
 }
 
@@ -1277,6 +1285,10 @@ void setup() {
   pinMode(kEncoderClkPin, INPUT_PULLUP);
   pinMode(kEncoderDtPin, INPUT_PULLUP);
   previousEncoderState = readEncoderState();
+  attachInterrupt(digitalPinToInterrupt(kEncoderClkPin), handleEncoderChange,
+                  CHANGE);
+  attachInterrupt(digitalPinToInterrupt(kEncoderDtPin), handleEncoderChange,
+                  CHANGE);
 
   keyboard.begin();
   consumerControl.begin();
