@@ -42,7 +42,7 @@ This fork is based on the original [codex-micro-device](https://github.com/Nishk
   - Mic B: `R3 C1`
   - Mic A: `R3 C2`
   - Send: `R3 C3`
-- Moved the encoder push switch to GPIO 12.
+- Uses a rotation-only encoder; no encoder push switch is installed.
 - Added live remapping over USB serial with persistent ESP32 flash storage.
 - Added two real keymap layers with a momentary `Fn` layer switch.
 - Added media controls and eight user macro slots.
@@ -87,7 +87,7 @@ The complete physical diagram is in [MATRIX-WIRING.md](MATRIX-WIRING.md).
 | --- | ---: |
 | Encoder A / CLK | 17 |
 | Encoder B / DT | 18 |
-| Encoder push switch | 12 |
+| Encoder push switch | Not installed |
 | Encoder and push-switch ground | GND |
 | RGB data | 47 |
 
@@ -137,7 +137,7 @@ The output is written to `macro-editor/dist/` when the standard build directory 
 - Click a physical control, then choose a key from the palette.
 - **Keymap 0** and **Keymap 1** are independent layers.
 - Assign `Fn` on Keymap 0, then hold it to activate Keymap 1.
-- **Key tester** reports physical key, encoder press, and encoder rotation events.
+- **Key tester** reports physical key and encoder rotation events.
 - **Matrix calibration** records raw `R# C#` coordinates in press order.
 - **MACRO** supports eight user-defined slots.
 - Macro editing supports text strings and key combos of up to five keys.
@@ -167,9 +167,9 @@ These actions are implemented as firmware keycodes `232` through `239`, separate
 
 Use the calibration tool before changing the logical map. A missing entire row or column indicates an open bus, solder joint, diode, or wire. The current GPIO mapping is listed above.
 
-### The encoder push button works but rotation does not
+### The encoder rotation does not work
 
-The encoder rotary common must connect to GND. The two rotary contacts must connect to GPIO 17 and GPIO 18. The push switch is separate and connects to GPIO 12 and GND. Use continuity mode to verify that both rotary contacts alternate with the common while turning.
+The encoder rotary common must connect to GND. The two rotary contacts must connect to GPIO 17 and GPIO 18. This build has no encoder push switch. Use continuity mode to verify that both rotary contacts alternate with the common while turning.
 
 ### Key combinations produce the wrong key
 

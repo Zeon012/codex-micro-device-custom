@@ -18,6 +18,7 @@ constexpr bool kDiagnosticKeyTestMode = false;
 
 constexpr uint8_t kEncoderClkPin = 17;
 constexpr uint8_t kEncoderDtPin = 18;
+constexpr bool kEncoderHasPushSwitch = false;
 constexpr uint8_t kEncoderSwitchPin = 12;
 constexpr uint8_t kMatrixRows[] = {8, 9, 10, 11};
 constexpr uint8_t kMatrixColumns[] = {4, 5, 6, 7};
@@ -1268,8 +1269,10 @@ void setup() {
     button.beginState();
   }
   beginMatrix();
-  encoderSwitch.setTestIndex(13);
-  encoderSwitch.begin();
+  if (kEncoderHasPushSwitch) {
+    encoderSwitch.setTestIndex(13);
+    encoderSwitch.begin();
+  }
 
   pinMode(kEncoderClkPin, INPUT_PULLUP);
   pinMode(kEncoderDtPin, INPUT_PULLUP);
@@ -1287,7 +1290,9 @@ void loop() {
   pollSerial();
   pollMatrix(nowMs);
   pollEncoder(nowMs);
-  encoderSwitch.poll(nowMs);
+  if (kEncoderHasPushSwitch) {
+    encoderSwitch.poll(nowMs);
+  }
   pollLedAnimation(nowMs);
 
   delay(1);

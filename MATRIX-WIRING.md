@@ -17,8 +17,8 @@ has a diode.
 | Column 2 | 6 | Input pull-up |
 | Column 3 | 7 | Input pull-up |
 
-Keep the encoder on GPIO 17/18/12, RGB data on GPIO 47, and GPIO 19/20 unused
-for native USB.
+Keep the encoder rotation on GPIO 17/18, RGB data on GPIO 47, and GPIO 12,
+19, and 20 unused.
 
 ## Physical map
 
@@ -67,9 +67,9 @@ independently in the mapper.
 
 ## Encoder wiring
 
-The EC11 encoder is separate from the key matrix. With the encoder shaft facing
-you, identify its pins using continuity mode because pin order varies between
-manufacturers.
+The rotation-only encoder is separate from the key matrix. It has no push
+switch. With the encoder shaft facing you, identify its pins using continuity
+mode because pin order varies between manufacturers.
 
 ```text
 EC11 pin/function       ESP32-S3
@@ -77,16 +77,13 @@ EC11 pin/function       ESP32-S3
 Encoder A / CLK         GPIO 17
 Encoder B / DT          GPIO 18
 Encoder common          GND
-Push switch pin 1       GPIO 12
-Push switch pin 2       GND
 ```
 
 The firmware uses `INPUT_PULLUP`, so do not add external pull-up resistors. The
-encoder and push switch are active-low: closing either contact connects its
-GPIO to ground.
+encoder contacts are active-low and are read against ground.
 
-For a typical five-pin EC11, the three encoder pins are the group of three
-terminals and the two push-switch pins are the separate pair. Use a multimeter
-to find the common encoder terminal: it alternates continuity with A and B as
-the shaft turns. If clockwise and counter-clockwise are reversed after wiring,
-swap A/B or enable the firmware's reverse-direction setting.
+Use the three rotary terminals: common, A, and B. Use a multimeter to find the
+common encoder terminal: it alternates continuity with A and B as the shaft
+turns. Leave any absent push-switch connection unused. If clockwise and
+counter-clockwise are reversed after wiring, swap A/B or enable the firmware's
+reverse-direction setting.

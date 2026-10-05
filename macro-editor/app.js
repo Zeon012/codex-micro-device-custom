@@ -5,7 +5,7 @@ const initialControls = [
   ['Fast mode', 5, 0, 0, 0, 0], ['Approve', 8, 0, 0, 0, 0],
   ['Reject', 12, 0, 0, 0, 0], ['Continue task', 15, 0, 0, 0, 0],
   ['Push to talk A', 9, 0, 0, 0, 0], ['Push to talk B', 13, 0, 0, 0, 0],
-  ['Send', 16, 0, 0, 0, 0], ['Encoder press', 12, 0, 0, 0, 0],
+  ['Send', 16, 0, 0, 0, 0], ['Encoder (no push)', 'ROTATION ONLY', 0, 0, 0, 0],
   ['Encoder clockwise', 'ROTATE CW', 0, 0, 0, 0],
   ['Encoder counter-clockwise', 'ROTATE CCW', 0, 0, 0, 0]
 ].map(([name, gpio, key, modifier, behavior, longKey]) => ({ name, gpio, key, modifier, behavior, longKey }));
@@ -137,7 +137,7 @@ function renderKeymap() {
   const encoder = controls[13];
   keymapPreview.innerHTML = `<div class="encoder-cluster" style="grid-column: 1; grid-row: 1 / span 2">
       <button class="map-direction ${selectedIndex === 14 ? 'selected' : ''}" data-map-index="14" title="Clockwise">${directionIcon(true)}</button>
-      <button class="map-knob ${selectedIndex === 13 ? 'selected' : ''}" data-map-index="13">KNOB<br><small>${modifierLabel(encoder.modifier)} + ${keyLabel(encoder.key)}</small></button>
+      <div class="map-knob no-push-knob">KNOB<br><small>ROTATION ONLY</small></div>
       <button class="map-direction ${selectedIndex === 15 ? 'selected' : ''}" data-map-index="15" title="Counter-clockwise">${directionIcon(false)}</button>
     </div>${keyMarkup}`;
   keymapPreview.querySelectorAll('[data-map-index]').forEach(button => button.addEventListener('click', () => {
